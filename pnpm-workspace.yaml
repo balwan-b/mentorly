@@ -1,0 +1,7 @@
+# Tells pnpm which build scripts are allowed to execute
+allowBuilds:
+  "@clerk/shared": true
+  "@tailwindcss/oxide": true
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
