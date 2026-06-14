@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Show, SignInButton } from "@clerk/nextjs";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -12,11 +13,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 export default function RequestsPage() {
-  const learnerRequests = useQuery(api.sessionRequests.listMyLearnerSessionRequests, {});
-  const mentorRequests = useQuery(api.sessionRequests.listMyMentorSessionRequests, {});
+  const learnerRequests = useQuery(api.sessionRequests.listMyLearnerSessionRequests, { limit: 25 });
+  const mentorRequests = useQuery(api.sessionRequests.listMyMentorSessionRequests, { limit: 25 });
   const acceptSessionRequest = useMutation(api.sessionRequests.acceptSessionRequest);
   const declineSessionRequest = useMutation(api.sessionRequests.declineSessionRequest);
   const withdrawSessionRequest = useMutation(api.sessionRequests.withdrawSessionRequest);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function runRequestAction(actionKey: string, action: () => Promise<unknown>) {
+    setErrorMessage(null);
+    setPendingAction(actionKey);
+    try {
+      await action();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Request update failed.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
 
   return (
     <div className="mentorly-shell">
@@ -50,6 +65,7 @@ export default function RequestsPage() {
               title="Requests you sent"
               description="As a learner, track the mentors you’ve contacted."
             >
+              {errorMessage ? <p className="mb-4 text-sm text-destructive">{errorMessage}</p> : null}
               {learnerRequests === undefined ? (
                 <LoadingState label="Loading learner requests..." />
               ) : learnerRequests.length === 0 ? (
@@ -75,12 +91,17 @@ export default function RequestsPage() {
                       status={request.status}
                       actions={
                         request.status === "submitted" ? (
-                          <button
-                            className="rounded-full border border-slate-300 px-4 py-2 text-sm"
-                            onClick={() => void withdrawSessionRequest({ requestId: request._id })}
+                          <Button
+                            variant="outline"
+                            disabled={pendingAction === `withdraw:${request._id}`}
+                            onClick={() =>
+                              void runRequestAction(`withdraw:${request._id}`, () =>
+                                withdrawSessionRequest({ requestId: request._id }),
+                              )
+                            }
                           >
-                            Withdraw
-                          </button>
+                            {pendingAction === `withdraw:${request._id}` ? "Withdrawing..." : "Withdraw"}
+                          </Button>
                         ) : null
                       }
                     />
@@ -119,18 +140,27 @@ export default function RequestsPage() {
                       actions={
                         request.status === "submitted" ? (
                           <>
-                            <button
-                              className="rounded-full bg-slate-900 px-4 py-2 text-sm text-white"
-                              onClick={() => void acceptSessionRequest({ requestId: request._id })}
+                            <Button
+                              disabled={pendingAction === `accept:${request._id}`}
+                              onClick={() =>
+                                void runRequestAction(`accept:${request._id}`, () =>
+                                  acceptSessionRequest({ requestId: request._id }),
+                                )
+                              }
                             >
-                              Accept
-                            </button>
-                            <button
-                              className="rounded-full border border-slate-300 px-4 py-2 text-sm"
-                              onClick={() => void declineSessionRequest({ requestId: request._id })}
+                              {pendingAction === `accept:${request._id}` ? "Accepting..." : "Accept"}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              disabled={pendingAction === `decline:${request._id}`}
+                              onClick={() =>
+                                void runRequestAction(`decline:${request._id}`, () =>
+                                  declineSessionRequest({ requestId: request._id }),
+                                )
+                              }
                             >
-                              Decline
-                            </button>
+                              {pendingAction === `decline:${request._id}` ? "Declining..." : "Decline"}
+                            </Button>
                           </>
                         ) : null
                       }

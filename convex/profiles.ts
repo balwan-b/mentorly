@@ -1,12 +1,15 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getOrCreateViewerUser, getViewerUser } from "./lib/auth";
 import { sessionFormatValidator } from "./lib/validators";
 import { DEFAULT_SESSION_FORMATS } from "../lib/constants";
-
-function normalizeTopics(topics?: string[]) {
-  return (topics ?? []).map((topic) => topic.trim()).filter(Boolean);
-}
+import {
+  clampQueryLimit,
+  normalizeTopics,
+  validateMoneyAmount,
+  validateNonNegativeInteger,
+  validateProfileFields,
+} from "./lib/domain";
 
 export const getMyProfile = query({
   args: {},
@@ -66,7 +69,7 @@ export const listActiveMentors = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const limit = Math.max(1, Math.min(args.limit ?? 24, 50));
+    const limit = clampQueryLimit(args.limit, 24, 50);
     const topic = args.topic?.trim().toLowerCase();
     const rows = await ctx.db
       .query("mentorProfiles")
@@ -110,6 +113,16 @@ export const upsertMentorProfile = mutation({
     isActive: v.boolean(),
   },
   handler: async (ctx, args) => {
+    validateProfileFields({
+      headline: args.headline,
+      bio: args.bio,
+    });
+    validateNonNegativeInteger(args.yearsExperience, "Years of experience", 80);
+    validateMoneyAmount(args.hourlyRate, "Hourly rate");
+    if ((args.sessionFormats ?? DEFAULT_SESSION_FORMATS).length === 0) {
+      throw new ConvexError("At least one session format is required.");
+    }
+
     const user = await getOrCreateViewerUser(ctx);
     const existing = await ctx.db
       .query("mentorProfiles")
@@ -147,6 +160,11 @@ export const upsertLearnerProfile = mutation({
     bio: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    validateProfileFields({
+      bio: args.bio,
+      goals: args.goals,
+    });
+
     const user = await getOrCreateViewerUser(ctx);
     const existing = await ctx.db
       .query("learnerProfiles")

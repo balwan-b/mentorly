@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Show, SignInButton } from "@clerk/nextjs";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { AppHeader } from "@/components/shared/app-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { LoadingState } from "@/components/shared/loading-state";
@@ -12,16 +13,19 @@ import { BookingCard } from "@/components/bookings/booking-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { formatUtcDateTime } from "@/lib/date";
 
 export default function BookingsPage() {
-  const learnerRequests = useQuery(api.sessionRequests.listMyLearnerSessionRequests, {});
-  const bookings = useQuery(api.bookings.listMyBookings, {});
+  const learnerRequests = useQuery(api.sessionRequests.listMyLearnerSessionRequests, { limit: 25 });
+  const bookings = useQuery(api.bookings.listMyBookings, { limit: 25 });
   const createBookingFromSessionRequest = useMutation(
     api.bookings.createBookingFromSessionRequest,
   );
   const cancelBooking = useMutation(api.bookings.cancelBooking);
   const completeBooking = useMutation(api.bookings.completeBooking);
   const [selectedRequestId, setSelectedRequestId] = useState<string>("");
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scheduledMessage, setScheduledMessage] = useState<string | null>(null);
 
   const acceptedRequests = useMemo(
@@ -38,7 +42,9 @@ export default function BookingsPage() {
   const currentRequestId = selectedRequestId || acceptedRequests[0]?._id;
   const availableSlots = useQuery(
     api.availability.listAvailableSlotsForSessionRequest,
-    currentRequestId ? { sessionRequestId: currentRequestId as never } : "skip",
+    currentRequestId
+      ? { sessionRequestId: currentRequestId as Id<"sessionRequests">, limit: 50 }
+      : "skip",
   );
 
   async function handleSchedule(slotId: string) {
@@ -46,11 +52,31 @@ export default function BookingsPage() {
       return;
     }
     setScheduledMessage(null);
-    await createBookingFromSessionRequest({
-      sessionRequestId: currentRequestId as never,
-      slotId: slotId as never,
-    });
-    setScheduledMessage("Session scheduled.");
+    setErrorMessage(null);
+    setPendingAction(`schedule:${slotId}`);
+    try {
+      await createBookingFromSessionRequest({
+        sessionRequestId: currentRequestId as Id<"sessionRequests">,
+        slotId: slotId as Id<"availabilitySlots">,
+      });
+      setScheduledMessage("Session scheduled.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to schedule session.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function runBookingAction(actionKey: string, action: () => Promise<unknown>) {
+    setErrorMessage(null);
+    setPendingAction(actionKey);
+    try {
+      await action();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Booking update failed.");
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   return (
@@ -85,6 +111,7 @@ export default function BookingsPage() {
               title="Schedule an accepted request"
               description="Learners can book accepted requests by choosing one of the mentor’s generated slots."
             >
+              {errorMessage ? <p className="mb-4 text-sm text-destructive">{errorMessage}</p> : null}
               {learnerRequests === undefined ? (
                 <LoadingState label="Loading accepted requests..." />
               ) : acceptedRequests.length === 0 ? (
@@ -96,6 +123,7 @@ export default function BookingsPage() {
                 <div className="space-y-4">
                   <Select
                     value={currentRequestId}
+                    disabled={pendingAction !== null}
                     onChange={(event) => setSelectedRequestId(event.target.value)}
                   >
                     {acceptedRequests.map((request) => (
@@ -121,13 +149,18 @@ export default function BookingsPage() {
                         >
                           <div>
                             <p className="text-sm font-medium text-foreground">
-                              {new Date(slot.startTime).toLocaleString()}
+                              {formatUtcDateTime(slot.startTime)}
                             </p>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Duration determined by the accepted request
+                              Booking slots are currently generated and displayed in UTC.
                             </p>
                           </div>
-                          <Button onClick={() => void handleSchedule(slot._id)}>Book this slot</Button>
+                          <Button
+                            disabled={pendingAction === `schedule:${slot._id}`}
+                            onClick={() => void handleSchedule(slot._id)}
+                          >
+                            {pendingAction === `schedule:${slot._id}` ? "Booking..." : "Book this slot"}
+                          </Button>
                         </div>
                       ))}
                     </div>
@@ -176,16 +209,26 @@ export default function BookingsPage() {
                             {booking.status === "scheduled" ? (
                               <Button
                                 variant="outline"
-                                onClick={() => void cancelBooking({ bookingId: booking._id })}
+                                disabled={pendingAction === `cancel:${booking._id}`}
+                                onClick={() =>
+                                  void runBookingAction(`cancel:${booking._id}`, () =>
+                                    cancelBooking({ bookingId: booking._id }),
+                                  )
+                                }
                               >
-                                Cancel
+                                {pendingAction === `cancel:${booking._id}` ? "Cancelling..." : "Cancel"}
                               </Button>
                             ) : null}
                             {booking.status === "scheduled" ? (
                               <Button
-                                onClick={() => void completeBooking({ bookingId: booking._id })}
+                                disabled={pendingAction === `complete:${booking._id}`}
+                                onClick={() =>
+                                  void runBookingAction(`complete:${booking._id}`, () =>
+                                    completeBooking({ bookingId: booking._id }),
+                                  )
+                                }
                               >
-                                Mark complete
+                                {pendingAction === `complete:${booking._id}` ? "Completing..." : "Mark complete"}
                               </Button>
                             ) : null}
                           </>

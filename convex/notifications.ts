@@ -1,7 +1,12 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { getViewerUser, requireViewerUser } from "./lib/auth";
 import { notificationTypeValidator } from "./lib/validators";
+import { clampQueryLimit } from "./lib/domain";
+
+const NOTIFICATION_LIST_LIMIT = 100;
+const NOTIFICATION_READ_BATCH_SIZE = 100;
 
 export const createNotificationInternal = internalMutation({
   args: {
@@ -41,12 +46,47 @@ export const listMyNotifications = query({
     if (!user) {
       return [];
     }
-    const limit = Math.max(1, Math.min(args.limit ?? 20, 100));
+    const limit = clampQueryLimit(args.limit, 20, NOTIFICATION_LIST_LIMIT);
     return await ctx.db
       .query("notifications")
       .withIndex("by_userId_createdAt", (q) => q.eq("userId", user._id))
       .order("desc")
       .take(limit);
+  },
+});
+
+export const markNotificationsReadBatchInternal = internalMutation({
+  args: {
+    userId: v.id("users"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = clampQueryLimit(
+      args.limit,
+      NOTIFICATION_READ_BATCH_SIZE,
+      NOTIFICATION_READ_BATCH_SIZE,
+    );
+    const unread = await ctx.db
+      .query("notifications")
+      .withIndex("by_userId_isRead_createdAt", (q) =>
+        q.eq("userId", args.userId).eq("isRead", false),
+      )
+      .take(limit);
+
+    if (unread.length === 0) {
+      return { processed: 0, remaining: false };
+    }
+
+    await Promise.all(
+      unread.map((notification) =>
+        ctx.db.patch(notification._id, { isRead: true }),
+      ),
+    );
+
+    return {
+      processed: unread.length,
+      remaining: unread.length === limit,
+    };
   },
 });
 
@@ -87,19 +127,23 @@ export const markAllNotificationsRead = mutation({
     if ((user.unreadNotificationCount ?? 0) === 0) {
       return { success: true };
     }
-    const unread = await ctx.db
-      .query("notifications")
-      .withIndex("by_userId_isRead_createdAt", (q) =>
-        q.eq("userId", user._id).eq("isRead", false),
-      )
-      .collect();
-    await Promise.all(
-      unread.map((notification) =>
-        ctx.db.patch(notification._id, { isRead: true }),
-      ),
-    );
+    let processed = 0;
+    let remaining = false;
+
+    do {
+      const result: { processed: number; remaining: boolean } = await ctx.runMutation(
+        internal.notifications.markNotificationsReadBatchInternal,
+        {
+          userId: user._id,
+          limit: NOTIFICATION_READ_BATCH_SIZE,
+        },
+      );
+      processed += result.processed;
+      remaining = result.remaining;
+    } while (remaining);
+
     await ctx.db.patch(user._id, {
-      unreadNotificationCount: 0,
+      unreadNotificationCount: Math.max((user.unreadNotificationCount ?? 0) - processed, 0),
       updatedAt: Date.now(),
     });
     return { success: true };

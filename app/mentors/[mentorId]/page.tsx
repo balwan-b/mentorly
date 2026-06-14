@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Show, SignInButton } from "@clerk/nextjs";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery } from "convex/react";
+import type { Id } from "@/convex/_generated/dataModel";
 import { api } from "@/convex/_generated/api";
 import { AppHeader } from "@/components/shared/app-header";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -20,15 +21,19 @@ import { Textarea } from "@/components/ui/textarea";
 export default function MentorDetailPage() {
   const params = useParams<{ mentorId: string }>();
   const mentorId = params.mentorId;
-  const mentor = useQuery(api.profiles.getPublicMentorProfile, {
-    userId: mentorId as never,
-  });
+  const mentorUserId = mentorId ? (mentorId as Id<"users">) : null;
+  const mentor = useQuery(
+    api.profiles.getPublicMentorProfile,
+    mentorUserId ? { userId: mentorUserId } : "skip",
+  );
   const createSessionRequest = useMutation(api.sessionRequests.createSessionRequest);
   const [form, setForm] = useState({
     topic: "",
     message: "",
     preferredDurationMinutes: 60,
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
   const mentorName = useMemo(() => {
@@ -38,19 +43,43 @@ export default function MentorDetailPage() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!mentorUserId) {
+      setErrorMessage("This mentor link is invalid.");
+      return;
+    }
+
+    const topic = form.topic.trim();
+    const message = form.message.trim();
+    if (!topic) {
+      setErrorMessage("Add a topic before sending the request.");
+      return;
+    }
+    if (!message) {
+      setErrorMessage("Add some context so the mentor can evaluate your request.");
+      return;
+    }
+
     setSavedMessage(null);
-    await createSessionRequest({
-      mentorUserId: mentorId as never,
-      topic: form.topic,
-      message: form.message,
-      preferredDurationMinutes: form.preferredDurationMinutes,
-    });
-    setSavedMessage("Session request sent.");
-    setForm({
-      topic: "",
-      message: "",
-      preferredDurationMinutes: 60,
-    });
+    setErrorMessage(null);
+    setIsSubmitting(true);
+    try {
+      await createSessionRequest({
+        mentorUserId: mentorUserId,
+        topic,
+        message,
+        preferredDurationMinutes: form.preferredDurationMinutes,
+      });
+      setSavedMessage("Session request sent.");
+      setForm({
+        topic: "",
+        message: "",
+        preferredDurationMinutes: 60,
+      });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to send session request.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -59,7 +88,7 @@ export default function MentorDetailPage() {
       <main className="mentorly-page">
         {mentor === undefined ? (
           <LoadingState label="Loading mentor profile..." />
-        ) : !mentor ? (
+        ) : !mentorUserId || !mentor ? (
           <EmptyState
             title="Mentor not found"
             description="This mentor profile is unavailable or not active yet."
@@ -111,7 +140,7 @@ export default function MentorDetailPage() {
 
             <SectionCard
               title="Request a session"
-              description="Send a simple session request now. Scheduling comes in the next phase."
+              description="Send a focused session request now. Once it is accepted, scheduling continues in the bookings workspace."
             >
               <Show when="signed-out">
                 <EmptyState
@@ -130,6 +159,8 @@ export default function MentorDetailPage() {
                   <Input
                     placeholder="What do you want help with?"
                     value={form.topic}
+                    maxLength={120}
+                    disabled={isSubmitting}
                     onChange={(event) =>
                       setForm((current) => ({ ...current, topic: event.target.value }))
                     }
@@ -138,12 +169,15 @@ export default function MentorDetailPage() {
                     className="min-h-36"
                     placeholder="Describe your goal, context, and what you'd like from the session."
                     value={form.message}
+                    maxLength={2000}
+                    disabled={isSubmitting}
                     onChange={(event) =>
                       setForm((current) => ({ ...current, message: event.target.value }))
                     }
                   />
                   <Select
                     value={form.preferredDurationMinutes}
+                    disabled={isSubmitting}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -167,7 +201,12 @@ export default function MentorDetailPage() {
                         : "Ask mentor"}
                     </p>
                   </div>
-                  <Button size="lg">Send session request</Button>
+                  <Button size="lg" disabled={isSubmitting}>
+                    {isSubmitting ? "Sending..." : "Send session request"}
+                  </Button>
+                  {errorMessage ? (
+                    <p className="text-sm text-destructive">{errorMessage}</p>
+                  ) : null}
                   {savedMessage ? (
                     <p className="text-sm text-emerald-700">{savedMessage}</p>
                   ) : null}

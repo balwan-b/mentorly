@@ -2,6 +2,8 @@
 
 Mentorly is a full-stack mentor booking app built with Next.js, Convex, and Clerk.
 
+It is structured as a production-oriented portfolio project: typed backend functions, Clerk-authenticated Convex access, route-level error boundaries, and CI checks for linting, type safety, and production builds.
+
 It currently supports:
 
 - sign up and sign in with Clerk
@@ -113,9 +115,28 @@ pnpm dev
 This runs:
 
 - `convex dev`
-- `next dev`
+- `next dev --webpack`
+
+If you want to isolate the frontend and backend while debugging local resource usage:
+
+```bash
+pnpm dev:web
+pnpm dev:convex
+```
+
+If you specifically want the newer Next.js dev engine again:
+
+```bash
+pnpm dev:turbo
+```
 
 ## Quality Checks
+
+Run the full local quality gate:
+
+```bash
+pnpm check
+```
 
 Lint:
 
@@ -178,6 +199,16 @@ npx convex codegen
 - Auth-linked user lookup prefers Clerk `tokenIdentifier` for stability.
 - Notification unread counts are denormalized onto the `users` table.
 - Availability generation updates available slots incrementally instead of rebuilding everything each time.
+- Public Convex queries that expose user-specific data enforce ownership checks server-side.
+- Request and booking mutations enforce lifecycle transitions server-side instead of relying on the client UI.
+- Global loading and error routes are defined in `app/loading.tsx` and `app/error.tsx`.
+
+## Production Readiness Notes
+
+- CI runs `pnpm lint`, `pnpm typecheck`, and `pnpm build` on every push and pull request.
+- Session requests, bookings, and notifications use bounded list queries to avoid unbounded reads on the hot paths.
+- Booking creation re-validates slot ownership, duration, and request-window constraints on the server.
+- Clerk webhook deletion cleans up related profiles, availability, requests, bookings, and notifications to avoid orphaned records.
 
 ## Status
 

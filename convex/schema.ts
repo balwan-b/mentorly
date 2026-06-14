@@ -85,6 +85,7 @@ export default defineSchema({
   })
     .index("by_mentorUserId_startTime", ["mentorUserId", "startTime"])
     .index("by_mentorUserId_status", ["mentorUserId", "status"])
+    .index("by_mentorUserId_status_startTime", ["mentorUserId", "status", "startTime"])
     .index("by_bookingId", ["bookingId"]),
 
   bookings: defineTable({

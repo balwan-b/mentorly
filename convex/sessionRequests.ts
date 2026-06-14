@@ -2,6 +2,19 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getOrCreateViewerUser, getViewerUser, requireViewerUser } from "./lib/auth";
 import { notifyUser } from "./lib/notifications";
+import { clampQueryLimit, validateSessionRequestInput } from "./lib/domain";
+
+const REQUEST_LIST_LIMIT = 50;
+
+function ensureRequestStatus(
+  currentStatus: "submitted" | "accepted" | "declined" | "withdrawn",
+  allowedStatuses: Array<"submitted" | "accepted" | "declined" | "withdrawn">,
+  message: string,
+) {
+  if (!allowedStatuses.includes(currentStatus)) {
+    throw new ConvexError(message);
+  }
+}
 
 export const createSessionRequest = mutation({
   args: {
@@ -14,6 +27,7 @@ export const createSessionRequest = mutation({
   },
   handler: async (ctx, args) => {
     const learner = await getOrCreateViewerUser(ctx);
+    const { topic, message } = validateSessionRequestInput(args);
     const mentor = await ctx.db.get(args.mentorUserId);
     if (!mentor) {
       throw new ConvexError("Mentor not found.");
@@ -30,16 +44,12 @@ export const createSessionRequest = mutation({
       throw new ConvexError("This mentor is not available for requests.");
     }
 
-    if (args.preferredEnd && args.preferredStart && args.preferredEnd < args.preferredStart) {
-      throw new ConvexError("Preferred end time cannot be earlier than start time.");
-    }
-
     const now = Date.now();
     const requestId = await ctx.db.insert("sessionRequests", {
       mentorUserId: args.mentorUserId,
       learnerUserId: learner._id,
-      topic: args.topic.trim(),
-      message: args.message.trim(),
+      topic,
+      message,
       preferredDurationMinutes: args.preferredDurationMinutes,
       preferredStart: args.preferredStart,
       preferredEnd: args.preferredEnd,
@@ -52,7 +62,7 @@ export const createSessionRequest = mutation({
       userId: mentor._id,
       type: "session_request_received",
       title: "New session request",
-      message: `${learner.firstName ?? "A learner"} sent a request about ${args.topic.trim()}.`,
+      message: `${learner.firstName ?? "A learner"} sent a request about ${topic}.`,
       linkUrl: "/requests",
     });
 
@@ -61,19 +71,20 @@ export const createSessionRequest = mutation({
 });
 
 export const listMyLearnerSessionRequests = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
     const learner = await getViewerUser(ctx);
     if (!learner) {
       return [];
     }
+    const limit = clampQueryLimit(args.limit, 25, REQUEST_LIST_LIMIT);
     const requests = await ctx.db
       .query("sessionRequests")
       .withIndex("by_learnerUserId_createdAt", (q) =>
         q.eq("learnerUserId", learner._id),
       )
       .order("desc")
-      .collect();
+      .take(limit);
 
     return await Promise.all(
       requests.map(async (request) => {
@@ -96,19 +107,20 @@ export const listMyLearnerSessionRequests = query({
 });
 
 export const listMyMentorSessionRequests = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
     const mentor = await getViewerUser(ctx);
     if (!mentor) {
       return [];
     }
+    const limit = clampQueryLimit(args.limit, 25, REQUEST_LIST_LIMIT);
     const requests = await ctx.db
       .query("sessionRequests")
       .withIndex("by_mentorUserId_createdAt", (q) =>
         q.eq("mentorUserId", mentor._id),
       )
       .order("desc")
-      .collect();
+      .take(limit);
 
     return await Promise.all(
       requests.map(async (request) => {
@@ -131,9 +143,13 @@ export const listMyMentorSessionRequests = query({
 export const getSessionRequestById = query({
   args: { requestId: v.id("sessionRequests") },
   handler: async (ctx, args) => {
+    const viewer = await requireViewerUser(ctx);
     const request = await ctx.db.get(args.requestId);
     if (!request) {
       return null;
+    }
+    if (request.mentorUserId !== viewer._id && request.learnerUserId !== viewer._id) {
+      throw new ConvexError("You do not have access to this session request.");
     }
 
     const [mentorUser, learnerUser] = await Promise.all([
@@ -153,6 +169,11 @@ export const acceptSessionRequest = mutation({
     if (!request || request.mentorUserId !== mentor._id) {
       throw new ConvexError("Session request not found.");
     }
+    ensureRequestStatus(
+      request.status,
+      ["submitted"],
+      "Only submitted requests can be accepted.",
+    );
     await ctx.db.patch(args.requestId, {
       status: "accepted",
       updatedAt: Date.now(),
@@ -176,6 +197,11 @@ export const declineSessionRequest = mutation({
     if (!request || request.mentorUserId !== mentor._id) {
       throw new ConvexError("Session request not found.");
     }
+    ensureRequestStatus(
+      request.status,
+      ["submitted"],
+      "Only submitted requests can be declined.",
+    );
     await ctx.db.patch(args.requestId, {
       status: "declined",
       updatedAt: Date.now(),
@@ -199,6 +225,11 @@ export const withdrawSessionRequest = mutation({
     if (!request || request.learnerUserId !== learner._id) {
       throw new ConvexError("Session request not found.");
     }
+    ensureRequestStatus(
+      request.status,
+      ["submitted"],
+      "Only submitted requests can be withdrawn.",
+    );
     await ctx.db.patch(args.requestId, {
       status: "withdrawn",
       updatedAt: Date.now(),

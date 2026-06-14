@@ -38,6 +38,10 @@ export default function ProfilePage() {
     goals: "",
     bio: "",
   });
+  const [mentorError, setMentorError] = useState<string | null>(null);
+  const [learnerError, setLearnerError] = useState<string | null>(null);
+  const [isSavingMentor, setIsSavingMentor] = useState(false);
+  const [isSavingLearner, setIsSavingLearner] = useState(false);
   const [mentorSaved, setMentorSaved] = useState<string | null>(null);
   const [learnerSaved, setLearnerSaved] = useState<string | null>(null);
 
@@ -67,31 +71,53 @@ export default function ProfilePage() {
   async function handleMentorSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMentorSaved(null);
-    await upsertMentorProfile({
-      headline: mentorForm.headline || undefined,
-      bio: mentorForm.bio || undefined,
-      topics: mentorForm.topics
-        .split(",")
-        .map((topic) => topic.trim())
-        .filter(Boolean),
-      yearsExperience: mentorForm.yearsExperience
-        ? Number(mentorForm.yearsExperience)
-        : undefined,
-      hourlyRate: mentorForm.hourlyRate ? Number(mentorForm.hourlyRate) : undefined,
-      sessionFormats: mentorForm.sessionFormats,
-      isActive: mentorForm.isActive,
-    });
-    setMentorSaved("Mentor profile saved.");
+    setMentorError(null);
+
+    if (mentorForm.sessionFormats.length === 0) {
+      setMentorError("Choose at least one session format.");
+      return;
+    }
+
+    setIsSavingMentor(true);
+    try {
+      await upsertMentorProfile({
+        headline: mentorForm.headline.trim() || undefined,
+        bio: mentorForm.bio.trim() || undefined,
+        topics: mentorForm.topics
+          .split(",")
+          .map((topic) => topic.trim())
+          .filter(Boolean),
+        yearsExperience: mentorForm.yearsExperience
+          ? Number(mentorForm.yearsExperience)
+          : undefined,
+        hourlyRate: mentorForm.hourlyRate ? Number(mentorForm.hourlyRate) : undefined,
+        sessionFormats: mentorForm.sessionFormats,
+        isActive: mentorForm.isActive,
+      });
+      setMentorSaved("Mentor profile saved.");
+    } catch (error) {
+      setMentorError(error instanceof Error ? error.message : "Failed to save mentor profile.");
+    } finally {
+      setIsSavingMentor(false);
+    }
   }
 
   async function handleLearnerSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLearnerSaved(null);
-    await upsertLearnerProfile({
-      goals: learnerForm.goals || undefined,
-      bio: learnerForm.bio || undefined,
-    });
-    setLearnerSaved("Learner profile saved.");
+    setLearnerError(null);
+    setIsSavingLearner(true);
+    try {
+      await upsertLearnerProfile({
+        goals: learnerForm.goals.trim() || undefined,
+        bio: learnerForm.bio.trim() || undefined,
+      });
+      setLearnerSaved("Learner profile saved.");
+    } catch (error) {
+      setLearnerError(error instanceof Error ? error.message : "Failed to save learner profile.");
+    } finally {
+      setIsSavingLearner(false);
+    }
   }
 
   return (
@@ -147,6 +173,8 @@ export default function ProfilePage() {
                   <Input
                     placeholder="Headline"
                     value={mentorForm.headline}
+                    maxLength={140}
+                    disabled={isSavingMentor}
                     onChange={(event) =>
                       setMentorForm((current) => ({
                         ...current,
@@ -158,6 +186,8 @@ export default function ProfilePage() {
                     className="min-h-32"
                     placeholder="Bio"
                     value={mentorForm.bio}
+                    maxLength={4000}
+                    disabled={isSavingMentor}
                     onChange={(event) =>
                       setMentorForm((current) => ({
                         ...current,
@@ -168,6 +198,7 @@ export default function ProfilePage() {
                   <Input
                     placeholder="Topics, comma separated"
                     value={mentorForm.topics}
+                    disabled={isSavingMentor}
                     onChange={(event) =>
                       setMentorForm((current) => ({
                         ...current,
@@ -188,6 +219,7 @@ export default function ProfilePage() {
                       type="number"
                       min="0"
                       value={mentorForm.yearsExperience}
+                      disabled={isSavingMentor}
                       onChange={(event) =>
                         setMentorForm((current) => ({
                           ...current,
@@ -200,6 +232,7 @@ export default function ProfilePage() {
                       type="number"
                       min="0"
                       value={mentorForm.hourlyRate}
+                      disabled={isSavingMentor}
                       onChange={(event) =>
                         setMentorForm((current) => ({
                           ...current,
@@ -220,6 +253,7 @@ export default function ProfilePage() {
                           >
                             <Checkbox
                               checked={checked}
+                              disabled={isSavingMentor}
                               onChange={(event) =>
                                 setMentorForm((current) => ({
                                   ...current,
@@ -238,6 +272,7 @@ export default function ProfilePage() {
                   <label className="flex items-center gap-3 text-sm text-foreground">
                     <Checkbox
                       checked={mentorForm.isActive}
+                      disabled={isSavingMentor}
                       onChange={(event) =>
                         setMentorForm((current) => ({
                           ...current,
@@ -247,7 +282,10 @@ export default function ProfilePage() {
                     />
                     Show this mentor profile in future discovery pages
                   </label>
-                    <Button size="lg">Save mentor profile</Button>
+                    <Button size="lg" disabled={isSavingMentor}>
+                      {isSavingMentor ? "Saving..." : "Save mentor profile"}
+                    </Button>
+                    {mentorError ? <p className="text-sm text-destructive">{mentorError}</p> : null}
                     {mentorSaved ? <p className="text-sm text-emerald-700">{mentorSaved}</p> : null}
                   </form>
                 </SectionCard>
@@ -261,6 +299,8 @@ export default function ProfilePage() {
                     className="min-h-32"
                     placeholder="What are you trying to learn or improve?"
                     value={learnerForm.goals}
+                    maxLength={2000}
+                    disabled={isSavingLearner}
                     onChange={(event) =>
                       setLearnerForm((current) => ({
                         ...current,
@@ -272,6 +312,8 @@ export default function ProfilePage() {
                     className="min-h-32"
                     placeholder="Optional bio"
                     value={learnerForm.bio}
+                    maxLength={4000}
+                    disabled={isSavingLearner}
                     onChange={(event) =>
                       setLearnerForm((current) => ({
                         ...current,
@@ -279,7 +321,10 @@ export default function ProfilePage() {
                       }))
                     }
                   />
-                    <Button size="lg">Save learner profile</Button>
+                    <Button size="lg" disabled={isSavingLearner}>
+                      {isSavingLearner ? "Saving..." : "Save learner profile"}
+                    </Button>
+                    {learnerError ? <p className="text-sm text-destructive">{learnerError}</p> : null}
                     {learnerSaved ? <p className="text-sm text-emerald-700">{learnerSaved}</p> : null}
                   </form>
                 </SectionCard>

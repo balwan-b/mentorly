@@ -1,7 +1,10 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { getOrCreateViewerUser, getViewerUser } from "./lib/auth";
+import { getOrCreateViewerUser, getViewerUser, requireViewerUser } from "./lib/auth";
 import { DEFAULT_SLOT_DURATION_MINUTES } from "../lib/constants";
+import { clampQueryLimit, validateAvailabilityRules } from "./lib/domain";
+
+const AVAILABLE_SLOT_LIMIT = 100;
 
 function parseTime(time: string) {
   const [hours, minutes] = time.split(":").map(Number);
@@ -89,6 +92,7 @@ export const setWeeklyAvailabilityRules = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    validateAvailabilityRules(args.rules);
     const mentor = await getOrCreateViewerUser(ctx);
     const existing = await ctx.db
       .query("availabilityRules")
@@ -128,13 +132,23 @@ export const generateAvailabilitySlots = mutation({
       .collect();
     const existingAvailableSlots = await ctx.db
       .query("availabilitySlots")
-      .withIndex("by_mentorUserId_status", (q) =>
+      .withIndex("by_mentorUserId_status_startTime", (q) =>
         q.eq("mentorUserId", mentor._id).eq("status", "available"),
       )
       .collect();
     const daysAhead = args.daysAhead ?? 14;
     const slotDurationMinutes =
       args.slotDurationMinutes ?? DEFAULT_SLOT_DURATION_MINUTES;
+    if (!Number.isInteger(daysAhead) || daysAhead < 1 || daysAhead > 30) {
+      throw new ConvexError("Days ahead must be between 1 and 30.");
+    }
+    if (
+      !Number.isInteger(slotDurationMinutes) ||
+      slotDurationMinutes < 15 ||
+      slotDurationMinutes > 180
+    ) {
+      throw new ConvexError("Slot duration must be between 15 and 180 minutes.");
+    }
     const now = Date.now();
     const desiredSlots = buildSlotRange(rules, now, daysAhead, slotDurationMinutes);
     const existingByStartTime = new Map(
@@ -169,39 +183,75 @@ export const generateAvailabilitySlots = mutation({
 export const listAvailableSlotsForMentor = query({
   args: {
     mentorUserId: v.id("users"),
+    limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const limit = clampQueryLimit(args.limit, 50, AVAILABLE_SLOT_LIMIT);
     return await ctx.db
       .query("availabilitySlots")
-      .withIndex("by_mentorUserId_status", (q) =>
+      .withIndex("by_mentorUserId_status_startTime", (q) =>
         q.eq("mentorUserId", args.mentorUserId).eq("status", "available"),
       )
-      .collect();
+      .take(limit);
   },
 });
 
 export const listAvailableSlotsForSessionRequest = query({
-  args: { sessionRequestId: v.id("sessionRequests") },
+  args: {
+    sessionRequestId: v.id("sessionRequests"),
+    limit: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
+    const viewer = await requireViewerUser(ctx);
     const request = await ctx.db.get(args.sessionRequestId);
     if (!request || request.status !== "accepted") {
       return [];
     }
+    if (request.mentorUserId !== viewer._id && request.learnerUserId !== viewer._id) {
+      throw new ConvexError("You do not have access to these slots.");
+    }
+    const limit = clampQueryLimit(args.limit, 50, AVAILABLE_SLOT_LIMIT);
     const slots = await ctx.db
       .query("availabilitySlots")
-      .withIndex("by_mentorUserId_status", (q) =>
-        q.eq("mentorUserId", request.mentorUserId).eq("status", "available"),
-      )
-      .collect();
+      .withIndex("by_mentorUserId_status_startTime", (q) => {
+        if (
+          request.preferredStart !== undefined &&
+          request.preferredEnd !== undefined
+        ) {
+          return q
+            .eq("mentorUserId", request.mentorUserId)
+            .eq("status", "available")
+            .gte("startTime", request.preferredStart)
+            .lte("startTime", request.preferredEnd);
+        }
+        if (request.preferredStart !== undefined) {
+          return q
+            .eq("mentorUserId", request.mentorUserId)
+            .eq("status", "available")
+            .gte("startTime", request.preferredStart);
+        }
+        if (request.preferredEnd !== undefined) {
+          return q
+            .eq("mentorUserId", request.mentorUserId)
+            .eq("status", "available")
+            .lte("startTime", request.preferredEnd);
+        }
+        return q
+          .eq("mentorUserId", request.mentorUserId)
+          .eq("status", "available");
+      })
+      .take(limit * 2);
 
-    return slots.filter((slot) => {
-      if (request.preferredStart && slot.startTime < request.preferredStart) {
-        return false;
-      }
-      if (request.preferredEnd && slot.endTime > request.preferredEnd) {
-        return false;
-      }
-      return slot.endTime - slot.startTime >= request.preferredDurationMinutes * 60 * 1000;
-    });
+    return slots
+      .filter((slot) => {
+        if (request.preferredStart !== undefined && slot.startTime < request.preferredStart) {
+          return false;
+        }
+        if (request.preferredEnd !== undefined && slot.endTime > request.preferredEnd) {
+          return false;
+        }
+        return slot.endTime - slot.startTime >= request.preferredDurationMinutes * 60 * 1000;
+      })
+      .slice(0, limit);
   },
 });

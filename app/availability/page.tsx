@@ -20,6 +20,9 @@ export default function AvailabilityPage() {
   const rules = useQuery(api.availability.listMyAvailabilityRules, {});
   const setWeeklyAvailabilityRules = useMutation(api.availability.setWeeklyAvailabilityRules);
   const generateAvailabilitySlots = useMutation(api.availability.generateAvailabilitySlots);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [rows, setRows] = useState<
     Array<{
@@ -51,14 +54,30 @@ export default function AvailabilityPage() {
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSavedMessage(null);
-    await setWeeklyAvailabilityRules({ rules: rows });
-    setSavedMessage("Weekly availability saved.");
+    setErrorMessage(null);
+    setIsSaving(true);
+    try {
+      await setWeeklyAvailabilityRules({ rules: rows });
+      setSavedMessage("Weekly availability saved. Times are currently interpreted in UTC.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to save availability.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function handleGenerateSlots() {
     setSavedMessage(null);
-    await generateAvailabilitySlots({ daysAhead: 14 });
-    setSavedMessage("Availability slots generated for the next 14 days.");
+    setErrorMessage(null);
+    setIsGenerating(true);
+    try {
+      await generateAvailabilitySlots({ daysAhead: 14 });
+      setSavedMessage("Availability slots generated for the next 14 days.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to generate availability slots.");
+    } finally {
+      setIsGenerating(false);
+    }
   }
 
   return (
@@ -94,9 +113,10 @@ export default function AvailabilityPage() {
               </div>
               <SectionCard
                 title="Weekly availability"
-                description="Keep this simple: define your weekly hours, then generate two weeks of bookable slots."
+                description="Define your weekly hours, then generate two weeks of bookable slots. Times are currently entered and generated in UTC."
               >
                 <form className="space-y-4" onSubmit={handleSave}>
+                  {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
                   {rows.map((row, index) => (
                     <div
                       key={row.dayOfWeek}
@@ -105,6 +125,7 @@ export default function AvailabilityPage() {
                       <label className="flex items-center gap-3 text-sm font-medium text-foreground">
                         <Checkbox
                           checked={row.isAvailable}
+                          disabled={isSaving || isGenerating}
                           onChange={(event) =>
                             setRows((current) =>
                               current.map((item, itemIndex) =>
@@ -120,6 +141,7 @@ export default function AvailabilityPage() {
                       <Input
                         type="time"
                         value={row.startTime}
+                        disabled={isSaving || isGenerating}
                         onChange={(event) =>
                           setRows((current) =>
                             current.map((item, itemIndex) =>
@@ -133,6 +155,7 @@ export default function AvailabilityPage() {
                       <Input
                         type="time"
                         value={row.endTime}
+                        disabled={isSaving || isGenerating}
                         onChange={(event) =>
                           setRows((current) =>
                             current.map((item, itemIndex) =>
@@ -147,9 +170,17 @@ export default function AvailabilityPage() {
                   ))}
 
                   <div className="flex flex-wrap gap-3">
-                    <Button size="lg">Save weekly availability</Button>
-                    <Button type="button" variant="outline" size="lg" onClick={() => void handleGenerateSlots()}>
-                      Generate slots
+                    <Button size="lg" disabled={isSaving || isGenerating}>
+                      {isSaving ? "Saving..." : "Save weekly availability"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="lg"
+                      disabled={isSaving || isGenerating}
+                      onClick={() => void handleGenerateSlots()}
+                    >
+                      {isGenerating ? "Generating..." : "Generate slots"}
                     </Button>
                   </div>
                   {savedMessage ? <p className="text-sm text-emerald-700">{savedMessage}</p> : null}

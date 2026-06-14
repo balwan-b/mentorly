@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "convex dev --start 'next dev'",
+    "dev": "convex dev --start 'next dev --webpack'",
+    "dev:turbo": "convex dev --start 'next dev --turbopack'",
+    "dev:web": "next dev --webpack",
+    "dev:web:turbo": "next dev --turbopack",
+    "dev:convex": "convex dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm lint && pnpm typecheck && pnpm build"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.3.7",

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useState } from "react";
 import { Show, SignInButton } from "@clerk/nextjs";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -9,11 +11,26 @@ import { LoadingState } from "@/components/shared/loading-state";
 import { SectionCard } from "@/components/shared/section-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { formatLocalDateTime } from "@/lib/date";
 
 export default function NotificationsPage() {
   const notifications = useQuery(api.notifications.listMyNotifications, { limit: 50 });
   const markNotificationRead = useMutation(api.notifications.markNotificationRead);
   const markAllNotificationsRead = useMutation(api.notifications.markAllNotificationsRead);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function runNotificationAction(actionKey: string, action: () => Promise<unknown>) {
+    setErrorMessage(null);
+    setPendingAction(actionKey);
+    try {
+      await action();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Notification update failed.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
 
   return (
     <div className="mentorly-shell">
@@ -46,6 +63,7 @@ export default function NotificationsPage() {
             title="Notifications"
             description="Updates from requests and bookings appear here automatically."
           >
+            {errorMessage ? <p className="mb-4 text-sm text-destructive">{errorMessage}</p> : null}
             {notifications === undefined ? (
               <LoadingState label="Loading notifications..." />
             ) : notifications.length === 0 ? (
@@ -56,8 +74,16 @@ export default function NotificationsPage() {
             ) : (
               <div className="space-y-4">
                 <div className="flex justify-end">
-                  <Button variant="outline" onClick={() => void markAllNotificationsRead({})}>
-                    Mark all read
+                  <Button
+                    variant="outline"
+                    disabled={pendingAction === "mark-all"}
+                    onClick={() =>
+                      void runNotificationAction("mark-all", () =>
+                        markAllNotificationsRead({}),
+                      )
+                    }
+                  >
+                    {pendingAction === "mark-all" ? "Marking..." : "Mark all read"}
                   </Button>
                 </div>
                 {notifications.map((notification) => (
@@ -69,19 +95,29 @@ export default function NotificationsPage() {
                       <div>
                         <h3 className="text-base font-semibold">{notification.title}</h3>
                         <p className="mt-2 text-sm text-muted-foreground">{notification.message}</p>
+                        {notification.linkUrl ? (
+                          <p className="mt-3 text-sm">
+                            <Link className="text-primary underline-offset-4 hover:underline" href={notification.linkUrl}>
+                              Open related page
+                            </Link>
+                          </p>
+                        ) : null}
                         <p className="mt-3 text-xs text-muted-foreground">
-                          {new Date(notification.createdAt).toLocaleString()}
+                          {formatLocalDateTime(notification.createdAt)}
                         </p>
                       </div>
                       {!notification.isRead ? (
                         <Button
                           size="sm"
                           variant="outline"
+                          disabled={pendingAction === `read:${notification._id}`}
                           onClick={() =>
-                            void markNotificationRead({ notificationId: notification._id })
+                            void runNotificationAction(`read:${notification._id}`, () =>
+                              markNotificationRead({ notificationId: notification._id }),
+                            )
                           }
                         >
-                          Mark read
+                          {pendingAction === `read:${notification._id}` ? "Marking..." : "Mark read"}
                         </Button>
                       ) : null}
                     </div>

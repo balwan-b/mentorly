@@ -2,6 +2,19 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getViewerUser, requireViewerUser } from "./lib/auth";
 import { notifyUser } from "./lib/notifications";
+import { clampQueryLimit } from "./lib/domain";
+
+const BOOKING_LIST_LIMIT = 50;
+
+function ensureBookingStatus(
+  currentStatus: "scheduled" | "completed" | "cancelled",
+  allowedStatuses: Array<"scheduled" | "completed" | "cancelled">,
+  message: string,
+) {
+  if (!allowedStatuses.includes(currentStatus)) {
+    throw new ConvexError(message);
+  }
+}
 
 export const createBookingFromSessionRequest = mutation({
   args: {
@@ -34,6 +47,15 @@ export const createBookingFromSessionRequest = mutation({
     }
     if (slot.status !== "available") {
       throw new ConvexError("This slot is no longer available.");
+    }
+    if (request.preferredStart !== undefined && slot.startTime < request.preferredStart) {
+      throw new ConvexError("This slot is earlier than the accepted request window.");
+    }
+    if (request.preferredEnd !== undefined && slot.endTime > request.preferredEnd) {
+      throw new ConvexError("This slot is later than the accepted request window.");
+    }
+    if (slot.endTime - slot.startTime < request.preferredDurationMinutes * 60 * 1000) {
+      throw new ConvexError("This slot is shorter than the accepted request duration.");
     }
 
     const mentorProfile = await ctx.db
@@ -88,34 +110,36 @@ export const createBookingFromSessionRequest = mutation({
 });
 
 export const listMyBookings = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
     const user = await getViewerUser(ctx);
     if (!user) {
       return [];
     }
+    const limit = clampQueryLimit(args.limit, 25, BOOKING_LIST_LIMIT);
     const [mentorBookings, learnerBookings] = await Promise.all([
       ctx.db
         .query("bookings")
         .withIndex("by_mentorUserId_scheduledAt", (q) =>
           q.eq("mentorUserId", user._id),
         )
-        .collect(),
+        .order("desc")
+        .take(limit),
       ctx.db
         .query("bookings")
         .withIndex("by_learnerUserId_scheduledAt", (q) =>
           q.eq("learnerUserId", user._id),
         )
-        .collect(),
+        .order("desc")
+        .take(limit),
     ]);
 
     const merged = [...mentorBookings, ...learnerBookings].sort(
       (a, b) => b.scheduledAt - a.scheduledAt,
     );
-    const unique = merged.filter(
-      (booking, index, all) =>
-        all.findIndex((item) => item._id === booking._id) === index,
-    );
+    const unique = Array.from(new Map(merged.map((booking) => [booking._id, booking])).values())
+      .sort((a, b) => b.scheduledAt - a.scheduledAt)
+      .slice(0, limit);
 
     return await Promise.all(
       unique.map(async (booking) => {
@@ -141,6 +165,11 @@ export const completeBooking = mutation({
     ) {
       throw new ConvexError("Booking not found.");
     }
+    ensureBookingStatus(
+      booking.status,
+      ["scheduled"],
+      "Only scheduled bookings can be marked complete.",
+    );
     await ctx.db.patch(args.bookingId, {
       status: "completed",
       updatedAt: Date.now(),
@@ -160,6 +189,11 @@ export const cancelBooking = mutation({
     ) {
       throw new ConvexError("Booking not found.");
     }
+    ensureBookingStatus(
+      booking.status,
+      ["scheduled"],
+      "Only scheduled bookings can be cancelled.",
+    );
 
     await ctx.db.patch(args.bookingId, {
       status: "cancelled",
