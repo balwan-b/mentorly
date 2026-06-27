@@ -71,18 +71,24 @@ export const listActiveMentors = query({
   handler: async (ctx, args) => {
     const limit = clampQueryLimit(args.limit, 24, 50);
     const topic = args.topic?.trim().toLowerCase();
-    const rows = await ctx.db
+    const limited = [];
+
+    for await (const mentorProfile of ctx.db
       .query("mentorProfiles")
-      .withIndex("by_isActive", (q) => q.eq("isActive", true))
-      .take(topic ? 200 : limit);
+      .withIndex("by_isActive", (q) => q.eq("isActive", true))) {
+      if (
+        topic &&
+        !mentorProfile.topics.some((item) => item.toLowerCase().includes(topic))
+      ) {
+        continue;
+      }
 
-    const filtered = topic
-      ? rows.filter((row) =>
-          row.topics.some((item) => item.toLowerCase().includes(topic)),
-        )
-      : rows;
+      limited.push(mentorProfile);
+      if (limited.length >= limit) {
+        break;
+      }
+    }
 
-    const limited = filtered.slice(0, limit);
     return await Promise.all(
       limited.map(async (mentorProfile) => {
         const user = await ctx.db.get(mentorProfile.userId);

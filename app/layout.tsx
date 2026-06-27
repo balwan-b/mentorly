@@ -5,9 +5,9 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Mentorly",
-  description: "A simple mentor booking platform built with Next.js, Clerk, and Convex.",
+  description: "A mentor booking platform for discovery, scheduling, and session coordination.",
   icons: {
-    icon: "/convex.svg",
+    icon: "/mentorly-mark.svg",
   },
 };
 

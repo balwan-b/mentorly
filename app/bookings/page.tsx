@@ -13,7 +13,7 @@ import { BookingCard } from "@/components/bookings/booking-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { formatUtcDateTime } from "@/lib/date";
+import { formatLocalDateTime, getLocalTimeZoneLabel } from "@/lib/date";
 
 export default function BookingsPage() {
   const learnerRequests = useQuery(api.sessionRequests.listMyLearnerSessionRequests, { limit: 25 });
@@ -27,6 +27,7 @@ export default function BookingsPage() {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scheduledMessage, setScheduledMessage] = useState<string | null>(null);
+  const localTimeZone = useMemo(() => getLocalTimeZoneLabel(), []);
 
   const acceptedRequests = useMemo(
     () => {
@@ -104,12 +105,12 @@ export default function BookingsPage() {
                 Schedule accepted requests, review upcoming sessions, and keep price expectations visible.
               </p>
             </div>
-            <Badge className="bg-background/90">No payments in v1</Badge>
+            <Badge className="bg-background/90">Transparent pricing</Badge>
           </div>
           <div className="grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
             <SectionCard
               title="Schedule an accepted request"
-              description="Learners can book accepted requests by choosing one of the mentor’s generated slots."
+              description={`Learners can book accepted requests by choosing one of the mentor's generated slots. Times are shown in ${localTimeZone}.`}
             >
               {errorMessage ? <p className="mb-4 text-sm text-destructive">{errorMessage}</p> : null}
               {learnerRequests === undefined ? (
@@ -149,10 +150,10 @@ export default function BookingsPage() {
                         >
                           <div>
                             <p className="text-sm font-medium text-foreground">
-                              {formatUtcDateTime(slot.startTime)}
+                              {formatLocalDateTime(slot.startTime)}
                             </p>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              Booking slots are currently generated and displayed in UTC.
+                              Converted to your local time automatically.
                             </p>
                           </div>
                           <Button
@@ -206,7 +207,7 @@ export default function BookingsPage() {
                         status={booking.status}
                         actions={
                           <>
-                            {booking.status === "scheduled" ? (
+                            {booking.canCancel ? (
                               <Button
                                 variant="outline"
                                 disabled={pendingAction === `cancel:${booking._id}`}
@@ -219,7 +220,7 @@ export default function BookingsPage() {
                                 {pendingAction === `cancel:${booking._id}` ? "Cancelling..." : "Cancel"}
                               </Button>
                             ) : null}
-                            {booking.status === "scheduled" ? (
+                            {booking.canComplete ? (
                               <Button
                                 disabled={pendingAction === `complete:${booking._id}`}
                                 onClick={() =>

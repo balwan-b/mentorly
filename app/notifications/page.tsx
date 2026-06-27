@@ -57,7 +57,7 @@ export default function NotificationsPage() {
                 Stay on top of request decisions and booking changes without polling around the app.
               </p>
             </div>
-            <Badge className="bg-background/90">Convex powered</Badge>
+            <Badge className="bg-background/90">Live updates</Badge>
           </div>
           <SectionCard
             title="Notifications"

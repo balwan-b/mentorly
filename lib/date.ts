@@ -9,12 +9,3 @@ export function formatLocalDateTime(value: number) {
 export function getLocalTimeZoneLabel() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
-
-export function formatUtcDateTime(value: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-    timeZoneName: "short",
-  }).format(new Date(value));
-}

@@ -5,6 +5,7 @@ import { notifyUser } from "./lib/notifications";
 import { clampQueryLimit } from "./lib/domain";
 
 const BOOKING_LIST_LIMIT = 50;
+const LEARNER_CANCELLATION_NOTICE_MS = 24 * 60 * 60 * 1000;
 
 function ensureBookingStatus(
   currentStatus: "scheduled" | "completed" | "cancelled",
@@ -148,7 +149,25 @@ export const listMyBookings = query({
           ctx.db.get(booking.learnerUserId),
           ctx.db.get(booking.sessionRequestId),
         ]);
-        return { ...booking, mentorUser, learnerUser, request };
+        const now = Date.now();
+        const isMentor = booking.mentorUserId === user._id;
+        const hasStarted = booking.scheduledAt <= now;
+        const hasEnded =
+          booking.scheduledAt + booking.durationMinutes * 60 * 1000 <= now;
+
+        return {
+          ...booking,
+          mentorUser,
+          learnerUser,
+          request,
+          viewerRole: isMentor ? "mentor" : "learner",
+          canCancel:
+            booking.status === "scheduled" &&
+            ((isMentor && !hasStarted) ||
+              (!isMentor &&
+                booking.scheduledAt - now >= LEARNER_CANCELLATION_NOTICE_MS)),
+          canComplete: booking.status === "scheduled" && isMentor && hasEnded,
+        };
       }),
     );
   },
@@ -170,6 +189,13 @@ export const completeBooking = mutation({
       ["scheduled"],
       "Only scheduled bookings can be marked complete.",
     );
+    if (booking.mentorUserId !== user._id) {
+      throw new ConvexError("Only the mentor can mark a session complete.");
+    }
+    const bookingEnd = booking.scheduledAt + booking.durationMinutes * 60 * 1000;
+    if (Date.now() < bookingEnd) {
+      throw new ConvexError("A session can only be completed after it has ended.");
+    }
     await ctx.db.patch(args.bookingId, {
       status: "completed",
       updatedAt: Date.now(),
@@ -194,6 +220,14 @@ export const cancelBooking = mutation({
       ["scheduled"],
       "Only scheduled bookings can be cancelled.",
     );
+    const now = Date.now();
+    if (booking.mentorUserId === user._id) {
+      if (booking.scheduledAt <= now) {
+        throw new ConvexError("A mentor cannot cancel a session after it has started.");
+      }
+    } else if (booking.scheduledAt - now < LEARNER_CANCELLATION_NOTICE_MS) {
+      throw new ConvexError("Learners must cancel at least 24 hours before the session.");
+    }
 
     await ctx.db.patch(args.bookingId, {
       status: "cancelled",

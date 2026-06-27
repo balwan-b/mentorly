@@ -2,26 +2,90 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getOrCreateViewerUser, getViewerUser, requireViewerUser } from "./lib/auth";
 import { DEFAULT_SLOT_DURATION_MINUTES } from "../lib/constants";
-import { clampQueryLimit, validateAvailabilityRules } from "./lib/domain";
+import {
+  clampQueryLimit,
+  ensureValidTimeZone,
+  validateAvailabilityRules,
+} from "./lib/domain";
 
 const AVAILABLE_SLOT_LIMIT = 100;
+const DEFAULT_TIME_ZONE = "UTC";
 
 function parseTime(time: string) {
   const [hours, minutes] = time.split(":").map(Number);
   return { hours, minutes };
 }
 
-function startOfUtcDay(timestamp: number) {
-  const date = new Date(timestamp);
-  return Date.UTC(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate(),
-    0,
-    0,
+function getTimeZoneParts(timestamp: number, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+
+  const parts = formatter.formatToParts(new Date(timestamp));
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? "0");
+
+  return {
+    year: read("year"),
+    month: read("month"),
+    day: read("day"),
+    hour: read("hour"),
+    minute: read("minute"),
+  };
+}
+
+function zonedLocalTimeToUtc(
+  value: {
+    year: number;
+    month: number;
+    day: number;
+    hour: number;
+    minute: number;
+  },
+  timeZone: string,
+) {
+  let guess = Date.UTC(
+    value.year,
+    value.month - 1,
+    value.day,
+    value.hour,
+    value.minute,
     0,
     0,
   );
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const actual = getTimeZoneParts(guess, timeZone);
+    const desiredMinutes = Date.UTC(
+      value.year,
+      value.month - 1,
+      value.day,
+      value.hour,
+      value.minute,
+    ) / 60000;
+    const actualMinutes = Date.UTC(
+      actual.year,
+      actual.month - 1,
+      actual.day,
+      actual.hour,
+      actual.minute,
+    ) / 60000;
+    const diffMinutes = desiredMinutes - actualMinutes;
+
+    if (diffMinutes === 0) {
+      return guess;
+    }
+
+    guess += diffMinutes * 60 * 1000;
+  }
+
+  return guess;
 }
 
 function buildSlotRange(
@@ -30,16 +94,24 @@ function buildSlotRange(
     endTime: string;
     isAvailable: boolean;
     startTime: string;
+    timeZone?: string;
   }>,
   now: number,
   daysAhead: number,
   slotDurationMinutes: number,
 ) {
   const desiredSlots = new Map<number, { endTime: number }>();
+  const timeZone = rules[0]?.timeZone ?? DEFAULT_TIME_ZONE;
+  const today = getTimeZoneParts(now, timeZone);
 
   for (let offset = 0; offset < daysAhead; offset += 1) {
-    const dayStart = startOfUtcDay(now + offset * 24 * 60 * 60 * 1000);
-    const dayOfWeek = new Date(dayStart).getUTCDay();
+    const localDate = new Date(
+      Date.UTC(today.year, today.month - 1, today.day + offset, 0, 0, 0, 0),
+    );
+    const year = localDate.getUTCFullYear();
+    const month = localDate.getUTCMonth() + 1;
+    const day = localDate.getUTCDate();
+    const dayOfWeek = localDate.getUTCDay();
     const dayRules = rules.filter(
       (rule) => rule.dayOfWeek === dayOfWeek && rule.isAvailable,
     );
@@ -47,9 +119,26 @@ function buildSlotRange(
     for (const rule of dayRules) {
       const start = parseTime(rule.startTime);
       const end = parseTime(rule.endTime);
-      const startTimestamp =
-        dayStart + (start.hours * 60 + start.minutes) * 60 * 1000;
-      const endTimestamp = dayStart + (end.hours * 60 + end.minutes) * 60 * 1000;
+      const startTimestamp = zonedLocalTimeToUtc(
+        {
+          year,
+          month,
+          day,
+          hour: start.hours,
+          minute: start.minutes,
+        },
+        timeZone,
+      );
+      const endTimestamp = zonedLocalTimeToUtc(
+        {
+          year,
+          month,
+          day,
+          hour: end.hours,
+          minute: end.minutes,
+        },
+        timeZone,
+      );
 
       for (
         let timestamp = startTimestamp;
@@ -82,6 +171,7 @@ export const listMyAvailabilityRules = query({
 
 export const setWeeklyAvailabilityRules = mutation({
   args: {
+    timeZone: v.string(),
     rules: v.array(
       v.object({
         dayOfWeek: v.number(),
@@ -93,6 +183,7 @@ export const setWeeklyAvailabilityRules = mutation({
   },
   handler: async (ctx, args) => {
     validateAvailabilityRules(args.rules);
+    ensureValidTimeZone(args.timeZone);
     const mentor = await getOrCreateViewerUser(ctx);
     const existing = await ctx.db
       .query("availabilityRules")
@@ -108,6 +199,7 @@ export const setWeeklyAvailabilityRules = mutation({
           dayOfWeek: rule.dayOfWeek,
           startTime: rule.startTime,
           endTime: rule.endTime,
+          timeZone: args.timeZone,
           isAvailable: rule.isAvailable,
           createdAt: now,
           updatedAt: now,

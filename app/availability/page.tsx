@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import { Show, SignInButton } from "@clerk/nextjs";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { getLocalTimeZoneLabel } from "@/lib/date";
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -24,6 +25,7 @@ export default function AvailabilityPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const browserTimeZone = useMemo(() => getLocalTimeZoneLabel(), []);
   const [rows, setRows] = useState<
     Array<{
       dayOfWeek: number;
@@ -32,6 +34,7 @@ export default function AvailabilityPage() {
       isAvailable: boolean;
     }>
   >(DEFAULT_WEEKLY_AVAILABILITY.map((rule) => ({ ...rule })));
+  const timeZone = rules?.[0]?.timeZone ?? browserTimeZone;
 
   useEffect(() => {
     if (rules === undefined || rules.length === 0) {
@@ -57,8 +60,8 @@ export default function AvailabilityPage() {
     setErrorMessage(null);
     setIsSaving(true);
     try {
-      await setWeeklyAvailabilityRules({ rules: rows });
-      setSavedMessage("Weekly availability saved. Times are currently interpreted in UTC.");
+      await setWeeklyAvailabilityRules({ timeZone, rules: rows });
+      setSavedMessage(`Weekly availability saved in ${timeZone}.`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to save availability.");
     } finally {
@@ -109,11 +112,11 @@ export default function AvailabilityPage() {
                     Define your weekly rhythm once, then generate bookable slots for the next two weeks.
                   </p>
                 </div>
-                <Badge className="bg-background/90">Simple weekly scheduling</Badge>
+                <Badge className="bg-background/90">{timeZone}</Badge>
               </div>
               <SectionCard
                 title="Weekly availability"
-                description="Define your weekly hours, then generate two weeks of bookable slots. Times are currently entered and generated in UTC."
+                description={`Define your weekly hours, then generate two weeks of bookable slots. Availability is stored in ${timeZone} and converted for viewers automatically.`}
               >
                 <form className="space-y-4" onSubmit={handleSave}>
                   {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}

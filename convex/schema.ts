@@ -67,6 +67,7 @@ export default defineSchema({
     dayOfWeek: v.number(),
     startTime: v.string(),
     endTime: v.string(),
+    timeZone: v.optional(v.string()),
     isAvailable: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),

@@ -30,7 +30,7 @@ export default function MentorsPage() {
               Explore active mentor profiles, compare topics and rates, then send a focused session request.
             </p>
           </div>
-          <Badge className="bg-background/90">Phase 2 marketplace core</Badge>
+          <Badge className="bg-background/90">Transparent rates</Badge>
         </div>
         <SectionCard
           title="Filter mentors"

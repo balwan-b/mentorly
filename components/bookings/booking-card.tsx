@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { formatUtcDateTime } from "@/lib/date";
+import { formatLocalDateTime } from "@/lib/date";
 import { BOOKING_STATUS_LABELS, type BookingStatus } from "@/lib/status";
 
 export function BookingCard({
@@ -32,7 +32,7 @@ export function BookingCard({
         </Badge>
       </div>
       <p className="mt-4 text-sm text-foreground/90">
-        {formatUtcDateTime(scheduledAt)}
+        {formatLocalDateTime(scheduledAt)}
       </p>
       <p className="mt-2 text-sm text-muted-foreground">{durationMinutes} minutes</p>
       <p className="mt-2 text-sm text-muted-foreground">

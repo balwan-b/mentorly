@@ -107,6 +107,14 @@ export function isValidTimeString(value: string) {
   return /^\d{2}:\d{2}$/.test(value);
 }
 
+export function ensureValidTimeZone(value: string) {
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+  } catch {
+    throw new ConvexError("A valid IANA time zone is required.");
+  }
+}
+
 export function validateAvailabilityRules(
   rules: Array<{
     dayOfWeek: number;

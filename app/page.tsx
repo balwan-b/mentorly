@@ -18,8 +18,8 @@ export default function HomePage() {
               Connect learners with mentors for focused one-on-one sessions.
             </h1>
             <p className="max-w-2xl text-lg text-muted-foreground">
-              Mentorly starts simple: mentor profiles, learner profiles, hourly pricing,
-              and a clean foundation for session requests and calendar scheduling.
+              Discover mentors, send focused session requests, and coordinate scheduling with
+              transparent pricing and clear availability.
             </p>
             <div className="flex flex-wrap gap-3">
               <Show when="signed-out">

@@ -2,7 +2,7 @@
 
 Mentorly is a full-stack mentor booking app built with Next.js, Convex, and Clerk.
 
-It is structured as a production-oriented portfolio project: typed backend functions, Clerk-authenticated Convex access, route-level error boundaries, and CI checks for linting, type safety, and production builds.
+It is structured as a showcase-ready portfolio project with typed backend functions, Clerk-authenticated Convex access, route-level error boundaries, and automated CI checks for linting, type safety, and production builds.
 
 It currently supports:
 
@@ -65,7 +65,7 @@ See [convex/schema.ts](./convex/schema.ts) for the authoritative schema.
 
 ## Environment Variables
 
-Create a local `.env.local` with values for:
+Copy `.env.example` to `.env.local` and fill in the values:
 
 ```env
 CONVEX_DEPLOYMENT=
@@ -79,6 +79,10 @@ CLERK_WEBHOOK_SIGNING_SECRET=
 
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+```
+
+```bash
+cp .env.example .env.local
 ```
 
 Notes:
@@ -205,10 +209,11 @@ npx convex codegen
 
 ## Production Readiness Notes
 
-- CI runs `pnpm lint`, `pnpm typecheck`, and `pnpm build` on every push and pull request.
+- GitHub Actions runs `pnpm lint`, `pnpm typecheck`, and `pnpm build` on every push and pull request.
 - Session requests, bookings, and notifications use bounded list queries to avoid unbounded reads on the hot paths.
 - Booking creation re-validates slot ownership, duration, and request-window constraints on the server.
-- Clerk webhook deletion cleans up related profiles, availability, requests, bookings, and notifications to avoid orphaned records.
+- Clerk webhook deletion cleans up related profiles, availability, requests, bookings, and notifications in batches to avoid transaction-limit failures.
+- Availability is stored in the mentor's configured time zone and converted to each viewer's local time for display.
 
 ## Status
 
@@ -224,7 +229,6 @@ Some reasonable next steps for the product:
 
 - payments and checkout
 - richer mentor filtering and sorting
-- timezone-aware scheduling UX
 - booking reminders and email notifications
-- automated tests
+- automated tests for booking and scheduling flows
 - deployment documentation
